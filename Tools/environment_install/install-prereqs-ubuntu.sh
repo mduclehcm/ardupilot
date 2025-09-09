@@ -60,7 +60,7 @@ fi
 # Checking Ubuntu release to adapt software version to install
 RELEASE_CODENAME=$(lsb_release -c -s)
 
-RELEASE_DISTRIBUTOR=$(lsb_release -i -s)
+RELEASE_DISTRIBUTOR=$(lsb_release -i -s | tr '[:upper:]' '[:lower:]')
 case ${RELEASE_DISTRIBUTOR} in
     elementary)
         case ${RELEASE_CODENAME} in
@@ -69,7 +69,7 @@ case ${RELEASE_DISTRIBUTOR} in
                 ;;
         esac
         ;;
-    LinuxMint)
+    linuxmint)
         # translate Mint-codenames to Ubuntu-codenames based on https://www.linuxmint.com/download_all.php
         case ${RELEASE_CODENAME} in
             wilma | xia)
@@ -308,7 +308,7 @@ elif [ ${RELEASE_CODENAME} == 'bookworm' ]; then
 elif [ ${RELEASE_CODENAME} == 'lunar' ]; then
     SITL_PKGS+=" libpython3-stdlib" # for argparse
 elif [ ${RELEASE_CODENAME} != 'mantic' ] &&
-     [ ${RELEASE_CODENAME} != 'noble' ] && 
+     [ ${RELEASE_CODENAME} != 'noble' ] &&
      [ ${RELEASE_CODENAME} != 'oracular' ] &&
      [ ${RELEASE_CODENAME} != 'plucky' ] &&
      true; then
@@ -415,6 +415,9 @@ if $IS_DOCKER; then
     echo "# ArduPilot env file. Need to be loaded by your Shell." > ~/$SHELL_LOGIN
 fi
 
+SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+ARDUPILOT_ROOT=$(realpath "$SCRIPT_DIR/../../")
+
 PIP_USER_ARGUMENT="--user"
 
 # create a Python venv on more recent releases:
@@ -433,14 +436,31 @@ fi
 
 if [ -n "$PYTHON_VENV_PACKAGE" ]; then
     $APT_GET install $PYTHON_VENV_PACKAGE
-    python3 -m venv --system-site-packages $HOME/venv-ardupilot
+
+    # Check if venv already exists in ARDUPILOT_ROOT (check both venv-ardupilot and venv)
+    VENV_PATH=""
+    if [ -d "$ARDUPILOT_ROOT/venv-ardupilot" ]; then
+        VENV_PATH="$ARDUPILOT_ROOT/venv-ardupilot"
+        echo "Found existing venv at $VENV_PATH"
+    elif [ -d "$ARDUPILOT_ROOT/venv" ]; then
+        VENV_PATH="$ARDUPILOT_ROOT/venv"
+        echo "Found existing venv at $VENV_PATH"
+    elif [ -d "$ARDUPILOT_ROOT/.venv" ]; then
+        VENV_PATH="$ARDUPILOT_ROOT/.venv"
+        echo "Found existing venv at $VENV_PATH"
+    else
+        VENV_PATH="$HOME/venv-ardupilot"
+        echo "Creating new venv at $VENV_PATH"
+        python3 -m venv --system-site-packages "$VENV_PATH"
+    fi
+
+    SOURCE_LINE="source $VENV_PATH/bin/activate"
 
     # activate it:
-    SOURCE_LINE="source $HOME/venv-ardupilot/bin/activate"
     $SOURCE_LINE
     PIP_USER_ARGUMENT=""
 
-    if [[ -z "${DO_PYTHON_VENV_ENV}" ]] && maybe_prompt_user "Make ArduPilot venv default for python [N/y]?" ; then
+    if [[ -z "${DO_PYTHON_VENV_ENV}" ]] && maybe_prompt_user "Make ArduPilot venv default for python [N/y]?\nThis means that any terminal will open and load ArduPilot venv" ; then
         DO_PYTHON_VENV_ENV=1
     fi
 
@@ -478,8 +498,32 @@ fi
 for PACKAGE in $PYTHON_PKGS; do
     if [ "$PACKAGE" == "wxpython" ]; then
         echo "##### $PACKAGE takes a *VERY* long time to install (~30 minutes).  Be patient."
+
+        # Use wheel repository for specific supported Ubuntu releases only
+        case ${RELEASE_CODENAME} in
+            focal)
+                echo "##### Adding wxpython wheel repository for faster installation"
+                WXPYTHON_WHEEL_REPO="https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-20.04"
+                time $PIP install $PIP_USER_ARGUMENT -U -f $WXPYTHON_WHEEL_REPO $PACKAGE
+                ;;
+            jammy)
+                echo "##### Adding wxpython wheel repository for faster installation"
+                WXPYTHON_WHEEL_REPO="https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04"
+                time $PIP install $PIP_USER_ARGUMENT -U -f $WXPYTHON_WHEEL_REPO $PACKAGE
+                ;;
+            noble)
+                echo "##### Adding wxpython wheel repository for faster installation"
+                WXPYTHON_WHEEL_REPO="https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-24.04"
+                time $PIP install $PIP_USER_ARGUMENT -U -f $WXPYTHON_WHEEL_REPO $PACKAGE
+                ;;
+            *)
+                echo "##### Installing wxpython from PyPI (no specific wheel repository for this release)"
+                time $PIP install $PIP_USER_ARGUMENT -U $PACKAGE
+                ;;
+        esac
+    else
+        time $PIP install $PIP_USER_ARGUMENT -U $PACKAGE
     fi
-    time $PIP install $PIP_USER_ARGUMENT -U $PACKAGE
 done
 
 # somehow Plucky really wants Pillow reinstalled or MAVProxy's map
@@ -509,37 +553,34 @@ fi
 
 heading "Adding ArduPilot Tools to environment"
 
-SCRIPT_DIR=$(dirname $(realpath ${BASH_SOURCE[0]}))
-ARDUPILOT_ROOT=$(realpath "$SCRIPT_DIR/../../")
-
 if [[ $DO_AP_STM_ENV -eq 1 ]]; then
 exportline="export PATH=$OPT/$ARM_ROOT/bin:\$PATH";
 grep -Fxq "$exportline" ~/$SHELL_LOGIN 2>/dev/null || {
     if maybe_prompt_user "Add $OPT/$ARM_ROOT/bin to your PATH [N/y]?" ; then
-        echo $exportline >> ~/$SHELL_LOGIN
-        eval $exportline
+        echo "$exportline" >> ~/$SHELL_LOGIN
+        eval "$exportline"
     else
         echo "Skipping adding $OPT/$ARM_ROOT/bin to PATH."
     fi
 }
 fi
 
-exportline2="export PATH=$ARDUPILOT_ROOT/$ARDUPILOT_TOOLS:\$PATH";
+exportline2="export PATH=\"$ARDUPILOT_ROOT/$ARDUPILOT_TOOLS:\"\$PATH";
 grep -Fxq "$exportline2" ~/$SHELL_LOGIN 2>/dev/null || {
     if maybe_prompt_user "Add $ARDUPILOT_ROOT/$ARDUPILOT_TOOLS to your PATH [N/y]?" ; then
-        echo $exportline2 >> ~/$SHELL_LOGIN
-        eval $exportline2
+        echo "$exportline2" >> ~/$SHELL_LOGIN
+        eval "$exportline2"
     else
         echo "Skipping adding $ARDUPILOT_ROOT/$ARDUPILOT_TOOLS to PATH."
     fi
 }
 
 if [[ $SKIP_AP_COMPLETION_ENV -ne 1 ]]; then
-exportline3="source $ARDUPILOT_ROOT/Tools/completion/completion.bash";
+exportline3="source \"$ARDUPILOT_ROOT/Tools/completion/completion.bash\"";
 grep -Fxq "$exportline3" ~/$SHELL_LOGIN 2>/dev/null || {
     if maybe_prompt_user "Add ArduPilot Bash Completion to your bash shell [N/y]?" ; then
-        echo $exportline3 >> ~/.bashrc
-        eval $exportline3
+        echo "$exportline3" >> ~/.bashrc
+        eval "$exportline3"
     else
         echo "Skipping adding ArduPilot Bash Completion."
     fi
@@ -549,8 +590,8 @@ fi
 exportline4="export PATH=/usr/lib/ccache:\$PATH";
 grep -Fxq "$exportline4" ~/$SHELL_LOGIN 2>/dev/null || {
     if maybe_prompt_user "Append CCache to your PATH [N/y]?" ; then
-        echo $exportline4 >> ~/$SHELL_LOGIN
-        eval $exportline4
+        echo "$exportline4" >> ~/$SHELL_LOGIN
+        eval "$exportline4"
     else
         echo "Skipping appending CCache to PATH."
     fi
@@ -560,7 +601,7 @@ echo "Done!"
 if [[ $SKIP_AP_GIT_CHECK -ne 1 ]]; then
   if [ -d ".git" ]; then
     heading "Update git submodules"
-    cd $ARDUPILOT_ROOT
+    cd "$ARDUPILOT_ROOT"
     git submodule update --init --recursive
     echo "Done!"
   fi

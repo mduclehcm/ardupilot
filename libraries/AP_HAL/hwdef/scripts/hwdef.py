@@ -41,6 +41,8 @@ class HWDef:
 
         # boolean indicating whether we have read and processed self.hwdef
         self.processed_hwdefs = False
+        # a set of files which have been processed to populate this object:
+        self.loaded_files = set()
 
         # sensor lists
         self.imu_list = []
@@ -73,6 +75,9 @@ class HWDef:
                     continue
             ret.append(line)
         return ret
+
+    def uses_filepath(self, filepath : str) -> bool:
+        return os.path.abspath(filepath) in self.loaded_files
 
     def running_in_CI(self):
         return os.getenv("GITHUB_ACTIONS") == "true"
@@ -159,9 +164,13 @@ class HWDef:
 
     def process_file(self, filename, depth=0):
         '''process a hwdef.dat file'''
+        self.progress(f"Processing {filename}")
+        self.loaded_files.add(os.path.abspath(filename))
         try:
             f = open(filename, "r")
-        except Exception:
+        except Exception as e:
+            if False:
+                raise e
             self.error("Unable to open file %s" % filename)
         for line in f.readlines():
             line = line.split('#')[0] # ensure we discard the comments
@@ -175,7 +184,6 @@ class HWDef:
                     dir = os.path.dirname(filename)
                     include_file = os.path.normpath(
                         os.path.join(dir, include_file))
-                self.progress("Including %s" % include_file)
                 self.process_file(include_file, depth+1)
             else:
                 self.process_line(line, depth)
@@ -383,6 +391,18 @@ class HWDef:
             f.write(f"#undef AP_BARO_{driver}_ENABLED\n#define AP_BARO_{driver}_ENABLED 1\n")
         if len(devlist) > 0:
             f.write('#define HAL_BARO_PROBE_LIST %s\n\n' % ';'.join(devlist))
+
+    def write_device_table(self, f, description, define_name, devlist):
+        '''writes out a #define which can be used as the body of a C
+        structure to populate object constructor arguments'''
+        if len(devlist) == 0:
+            f.write(f'\n// No {description}\n')
+            return
+
+        f.write(f'\n// {description} table\n')
+        f.write(f'#define {define_name} \\\n')
+        f.write(',\\\n'.join([f"   {x}" for x in devlist]))
+        f.write("\n")
 
     def write_env_py(self, filename):
         '''write out env.py for environment variables to control the build process'''

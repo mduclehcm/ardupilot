@@ -46,11 +46,6 @@
 // 2 use udp, 1 use tcp...  for udp,client needs to connect as UDPCL in missionplanner etc to 192.168.4.1 port 14550
 #define HAL_ESP32_WIFI 2
 
-// see boards.py
-#ifndef ENABLE_HEAP
-#define ENABLE_HEAP 1
-#endif
-
 #define WIFI_SSID "ardupilot123"
 #define WIFI_PWD "ardupilot123"
 
@@ -79,11 +74,6 @@
 #define HAL_LOGGING_FILESYSTEM_ENABLED 0
 #define HAL_LOGGING_DATAFLASH_ENABLED 0
 #define HAL_LOGGING_MAVLINK_ENABLED 0
-
-#define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
-#define HAL_BOARD_STORAGE_DIRECTORY "/SDCARD/APM/STORAGE"
-#define HAL_BOARD_LOG_DIRECTORY "/SDCARD/APM/LOGS"
-#define HAL_BOARD_TERRAIN_DIRECTORY "/SDCARD/APM/TERRAIN"
 
 #define HAL_LOGGING_BACKENDS_DEFAULT 1
 
